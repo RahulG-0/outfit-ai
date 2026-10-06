@@ -1,36 +1,86 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# OutfitPicker
 
-## Getting Started
+Upload photos of your clothes, pick one, and get ranked suggestions for what to wear with it.
 
-First, run the development server:
+## How it works
 
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+1. **Add an item.** You upload a photo and choose its category (top, bottom, outerwear, shoes or accessory).
+2. **The backend analyses it.**
+   - A MobileNetV2 network pretrained on ImageNet turns the photo into a 1280-number embedding that captures texture, pattern and shape. The network is used as a fixed feature extractor; nothing is trained here.
+   - The dominant colour is taken from the centre of the photo, so a plain background doesn't win.
+3. **Pick an item** and every other item is scored against it:
+
+| Signal | Weight | Rule |
+|---|---|---|
+| Category | 0.50 | The pairing must complete the outfit: a top needs a bottom, not another top. |
+| Colour harmony | 0.35 | Neutrals go with anything. Close hues and opposite hues score well. Hues a quarter of the colour wheel apart score worst. |
+| Style similarity | 0.15 | Cosine similarity between the two embeddings. |
+
+The weights live in one place, `backend/recommend.py`.
+
+## Project layout
+
+```
+app/                    Next.js front end
+  page.tsx              wardrobe page
+  components/           upload form, wardrobe grid, pairings
+  lib/api.ts            typed client for the backend
+backend/                FastAPI service
+  main.py               routes
+  model.py              embedding and dominant colour
+  recommend.py          pairing scores
+  store.py              JSON and image storage
+  test_recommend.py     tests for the scoring
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+## Run it
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+Backend (Python 3.10 to 3.12):
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+```bash
+cd backend
+python -m venv .venv
+source .venv/bin/activate        # Windows: .venv\Scripts\activate
+pip install -r requirements.txt
+uvicorn main:app --port 8000
+```
 
-## Learn More
+The first upload downloads the MobileNetV2 weights (about 14 MB).
 
-To learn more about Next.js, take a look at the following resources:
+Front end:
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+```bash
+npm install
+cp .env.local.example .env.local
+npm run dev
+```
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+Then open http://localhost:3000.
 
-## Deploy on Vercel
+## API
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+| Method | Path | Purpose |
+|---|---|---|
+| `POST` | `/wardrobe` | Add an item (form fields `category` and `image`) |
+| `GET` | `/wardrobe` | List items |
+| `DELETE` | `/wardrobe/{id}` | Remove an item |
+| `GET` | `/recommend/{id}` | Ranked pairings for an item, with the score breakdown |
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+## Tests
+
+```bash
+cd backend
+python test_recommend.py
+```
+
+The scoring tests use hand-written embeddings, so they run without TensorFlow.
+
+## Limitations
+
+- The category is chosen by the user, not predicted from the photo.
+- The scoring weights are set by hand; they have not been fitted to labelled outfits.
+- Storage is a single JSON file, which suits one user on one machine.
+
+## Stack
+
+Next.js, TypeScript, Tailwind CSS, Python, FastAPI, TensorFlow/Keras (MobileNetV2), NumPy, Pillow.
